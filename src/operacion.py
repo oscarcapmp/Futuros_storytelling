@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import time
+import estado_operacion
 from config_wma_pack import wma_name_from_len
 from infra_futuros import (
     atr,
     floor_to_step,
     format_quantity,
+    get_futures_usdt_balance,
     get_hlc_futures,
     get_lot_size_filter_futures,
     get_min_notional_futures,
@@ -119,6 +121,11 @@ def cerrar_posicion_market(client, symbol: str, simular: bool):
         resp = client.new_order(symbol=symbol, side=side, type="MARKET", quantity=qty_str)
         print("✅ Orden de cierre enviada. Respuesta de Binance:")
         print(resp)
+        try:
+            balance_final = get_futures_usdt_balance(client)
+            estado_operacion.save_end(balance_final)
+        except Exception as e:
+            print(f"⚠️ No se pudo guardar cierre de operación: {e}")
     except Exception as e:
         print(f"❌ Error al cerrar la posición: {e}")
 
@@ -267,6 +274,15 @@ def comprar_long_por_cruce_wma(
     if simular:
         print("SIMULACIÓN: No se envía orden de apertura real.\n")
     else:
+        try:
+            balance_inicial = get_futures_usdt_balance(client)
+            try:
+                estado_operacion.save_start(symbol, balance_inicial)
+            except Exception as e:
+                print(f"⚠️ No se pudo guardar inicio de operación: {e}")
+        except Exception as e:
+            print(f"⚠️ No se pudo leer balance inicial para guardar estado: {e}")
+
         try:
             print("📥 ENVIANDO ORDEN MARKET BUY (LONG FUTUROS)...")
             entry_order = client.new_order(
@@ -501,6 +517,15 @@ def comprar_short_por_cruce_wma(
     if simular:
         print("SIMULACIÓN: No se envía orden de apertura real.\n")
     else:
+        try:
+            balance_inicial = get_futures_usdt_balance(client)
+            try:
+                estado_operacion.save_start(symbol, balance_inicial)
+            except Exception as e:
+                print(f"⚠️ No se pudo guardar inicio de operación: {e}")
+        except Exception as e:
+            print(f"⚠️ No se pudo leer balance inicial para guardar estado: {e}")
+
         try:
             print("📥 ENVIANDO ORDEN MARKET SELL (SHORT FUTUROS)...")
             entry_order = client.new_order(
