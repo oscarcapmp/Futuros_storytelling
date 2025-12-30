@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import time
+from config_wma_pack import WMA_FIB_LENGTHS, wma_name_from_len
+from infra_futuros import format_quantity, get_hlc_futures, sonar_alarma, wma
+from Trailing_dinamico import get_trailing_reference
+from stop_clasico import init_stop_state, eval_stop_clasico_by_wma
+from freno_emergencia import compute_freno_emergencia_stop_level
+from target import close_market_reduceonly_pct, should_trigger_touch_wma
+
+
+STOP_BREAKOUT_BUFFER_PCT = 0.17
+ATR_LEN_DEFAULT = 14
+ATR_MULT_DEFAULT = 1.5
+
+
+def tactica_salida_trailing_stop_wma(
+    client,
+    symbol: str,
+    base_asset: str,
+    interval: str,
+    sleep_seconds: int,
+    trailing_ref_mode: str,
+    wma_stop_len: int | None,
+    wait_on_close: bool,
+    stop_rule_mode: str,
+    qty_est: float,
+    qty_str: str,
+    entry_exec_price: float,
+    entry_margin_usdt: float,
+    simular: bool,
+    side: str,
+    entry_order_id: int | None = None,
+    balance_inicial_futuros: float | None = None,
+    emergency_brake_enabled: bool = True,
+    storytelling_ctx: dict | None = None,
+):
+    stop_state = init_stop_state()
+    qty_close_str = qty_str or format_quantity(abs(qty_est))
+    stop_mode_norm = (stop_rule_mode or "breakout").lower()
+    ref_mode_norm = (trailing_ref_mode or "fixed").lower()
+    active_trailing_len = wma_stop_len if ref_mode_norm != "dynamic" else None
+    active_trailing_name = wma_name_from_len(active_trailing_len) if active_trailing_len else None
+    freno_stop_level = None
+    freno_atr = None
+    freno_wma34 = None
+    if emergency_brake_enabled:
+        freno_info = compute_freno_emergencia_stop_level(
+            client=client,
+            symbol=symbol,
+            interval=interval,
+            side=side,
+            atr_len=ATR_LEN_DEFAULT,
+            atr_mult=ATR_MULT_DEFAULT,
+        )
+        freno_stop_level = freno_info.get("stop_level")
+        freno_atr = freno_info.get("atr")
+        freno_wma34 = freno_info.get("wma34")
+
+    while True:
+        try:
+            max_wma_len = max(([wma_stop_len] if wma_stop_len else []) + WMA_FIB_LENGTHS)
+            limit_needed = max(max_wma_len + 5, 120)
+            highs, lows, closes = get_hlc_futures(client, symbol, interval, limit=limit_needed)
+            close_current = closes[-1]
+            close_prev = closes[-2]
+            close_prevprev = closes[-3]
+            high_current = highs[-1]
+            low_current = lows[-1]
+            high_prev = highs[-2]
+            low_prev = lows[-2]
+            price_now = close_current
+            price_for_stop = close_prev if wait_on_close else close_current
+
+            if storytelling_ctx and not storytelling_ctx.get("executed") and not storytelling_ctx.get("attempted"):
+                mode = storytelling_ctx.get("mode")
+                pct_close = storytelling_ctx.get("pct", 0.50)
+                trigger_hit = False
+
+                if mode == "TRAGUITO":
+                    target_price = storytelling_ctx.get("target_price")
+                    if target_price is not None:
+                        trigger_hit = (side == "long" and price_now >= target_price) or (
+                            side == "short" and price_now <= target_price
+                        )
+                elif mode in ["WMA233", "WMA377"]:
+                    wma_len = 233 if mode == "WMA233" else 377
+                    wma_now = wma(closes, wma_len)
+                    if wma_now is not None:
+                        trigger_hit = should_trigger_touch_wma(side, price_now, wma_now)
+
+                if trigger_hit:
+                    storytelling_ctx["attempted"] = True
+                    mode_txt = mode or "TARGET"
+                    print(f"🎯 [TARGET] {mode_txt} disparado -> cerrando {pct_close*100:.2f}% MARKET reduceOnly...")
+                    res = close_market_reduceonly_pct(
+                        client=client,
+                        symbol=symbol,
+                        side=side,
+                        pct=pct_close,
+                        simular=simular,
+                    )
+                    order_id = res.get("orderId")
+                    if order_id or res.get("simulated"):
+                        storytelling_ctx["executed"] = True
+                        print(f"✅ [TARGET] {mode_txt} ejecutado orderId={order_id or 'sim'}")
+                    else:
+                        reason = res.get("reason") or res.get("error") or "no_order"
+                        print(f"[WARN] {mode_txt} no ejecutado: {reason}")
+
+            freno_triggered = False
+            if emergency_brake_enabled and freno_stop_level is not None:
+                freno_triggered = price_for_stop <= freno_stop_level if side == "long" else price_for_stop >= freno_stop_level
+
+            if emergency_brake_enabled:
+                freno_level_txt = f"{freno_stop_level:.4f}" if freno_stop_level is not None else "N/D"
+                atr_txt = f"{freno_atr:.4f}" if freno_atr is not None else "N/D"
+                wma34_txt = f"{freno_wma34:.4f}" if freno_wma34 is not None else "N/D"
+                print(
+                    f"[FRENO] nivel_fijo={freno_level_txt} precio={price_for_stop:.4f} atr={atr_txt} wma34={wma34_txt}"
+                )
+
+            if freno_triggered:
+                sonar_alarma()
+                print(
+                    f"[FRENO] Cierre total por emergencia ATR+WMA34 @ {freno_level_txt} "
+                    f"(atr={atr_txt}, wma34={wma34_txt})"
+                )
+                if simular:
+                    print(f"[SIMULACIÓN] Cierre total qty={qty_close_str}")
+                else:
+                    exit_side = "SELL" if side == "long" else "BUY"
+                    try:
+                        client.new_order(
+                            symbol=symbol,
+                            side=exit_side,
+                            type="MARKET",
+                            quantity=qty_close_str,
+                            reduceOnly=True,
+                        )
+                    except Exception as e:
+                        print(f"❌ Error cerrando por freno emergencia: {e}")
+                return
+
+            trailing_len = None
+            trailing_name = None
+            if ref_mode_norm == "dynamic":
+                trailing_ref = get_trailing_reference(side, closes)
+                new_trailing_len = trailing_ref.get("trailing_len")
+                if new_trailing_len is not None:
+                    if new_trailing_len != active_trailing_len:
+                        active_trailing_len = new_trailing_len
+                        active_trailing_name = wma_name_from_len(active_trailing_len)
+                        reason = trailing_ref.get("reason", "cruce_detectado")
+                        print(f"[TRAILING] update -> {active_trailing_name}({active_trailing_len}) reason={reason}")
+            else:
+                active_trailing_len = wma_stop_len if wma_stop_len and wma_stop_len > 0 else None
+                active_trailing_name = wma_name_from_len(active_trailing_len) if active_trailing_len else None
+
+            trailing_len = active_trailing_len
+            trailing_name = active_trailing_name or (wma_name_from_len(trailing_len) if trailing_len else None)
+
+            trailing_value_current = wma(closes, trailing_len) if trailing_len else None
+            trailing_value_prev = wma(closes[:-1], trailing_len) if trailing_len else None
+            trailing_value_prevprev = wma(closes[:-2], trailing_len) if trailing_len else None
+
+            stop_state, stop_decision = eval_stop_clasico_by_wma(
+                side=side,
+                close_current=close_current,
+                close_prev=close_prev,
+                close_prevprev=close_prevprev,
+                high_current=high_current,
+                low_current=low_current,
+                high_prev=high_prev,
+                low_prev=low_prev,
+                trailing_value_current=trailing_value_current,
+                trailing_value_prev=trailing_value_prev,
+                trailing_value_prevprev=trailing_value_prevprev,
+                wait_on_close=wait_on_close,
+                stop_rule_mode=stop_mode_norm,
+                state=stop_state,
+                buffer_ratio=STOP_BREAKOUT_BUFFER_PCT,
+            )
+
+            trailing_name_txt = trailing_name or "-"
+            trailing_len_txt = trailing_len if trailing_len is not None else "-"
+            trailing_val_txt = f"{trailing_value_current:.4f}" if trailing_value_current is not None else "N/D"
+            print(
+                f"[STOP] trailing={trailing_name_txt}({trailing_len_txt})@{trailing_val_txt} action={stop_decision.get('action')}"
+            )
+
+            if stop_decision.get("pending_trigger") is not None:
+                print(
+                    f"[STOP] Trigger preparado: {stop_decision.get('pending_trigger'):.4f} "
+                    f"(buffer={stop_decision.get('pending_buffer'):.4f})"
+                )
+
+            if stop_decision.get("action") == "close_all":
+                exit_price = stop_decision.get("exit_price", price_for_stop)
+                sonar_alarma()
+                lado_txt = "LONG" if side == "long" else "SHORT"
+                print(f"\n=== [FUTUROS] SEÑAL DE SALIDA {lado_txt} DETECTADA (STOP CLÁSICO) ===")
+                print(f"Motivo:   {stop_decision.get('reason')}")
+                print(f"Salida a: {exit_price:.4f}")
+                print(f"Cantidad a cerrar: {qty_close_str} {base_asset}")
+                print(f"Modo: {'SIMULACIÓN' if simular else 'REAL'}\n")
+
+                if not simular:
+                    exit_side = "SELL" if side == "long" else "BUY"
+                    try:
+                        client.new_order(
+                            symbol=symbol,
+                            side=exit_side,
+                            type="MARKET",
+                            quantity=qty_close_str,
+                            reduceOnly=True,
+                        )
+                    except Exception as e:
+                        print(f"❌ Error al enviar la orden de cierre en Futuros: {e}")
+                else:
+                    print("SIMULACIÓN: No se envió orden real de cierre.")
+
+                print("\nBot Futuros finalizado tras ejecutar la salida.\n")
+                return
+
+            time.sleep(sleep_seconds)
+
+        except KeyboardInterrupt:
+            print("\nBot detenido manualmente durante la fase de STOP en Futuros.")
+            return
+        except Exception as e:
+            print(f"Error en fase de STOP (Futuros): {e}")
+            time.sleep(sleep_seconds)
+
+
+def tactica_salida_trailing_3_fases(*args, **kwargs):
+    """
+    Trailing stop en 3 fases:
+    - Un porcentaje en WMA 34
+    - Otro en WMA 89
+    - Otro en WMA 233
+    """
+    pass
