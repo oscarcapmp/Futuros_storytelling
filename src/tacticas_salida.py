@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from config_wma_pack import WMA_FIB_LENGTHS, wma_name_from_len
+from execution import execute_close_market
 from infra_futuros import format_quantity, get_hlc_futures, sonar_alarma, wma
 from Trailing_dinamico import get_trailing_reference
 from stop_clasico import init_stop_state, eval_stop_clasico_by_wma
@@ -131,12 +132,14 @@ def tactica_salida_trailing_stop_wma(
                 else:
                     exit_side = "SELL" if side == "long" else "BUY"
                     try:
-                        client.new_order(
+                        execute_close_market(
+                            client=client,
                             symbol=symbol,
                             side=exit_side,
-                            type="MARKET",
                             quantity=qty_close_str,
-                            reduceOnly=True,
+                            simular=simular,
+                            reduce_only=True,
+                            context="FRENO",
                         )
                     except Exception as e:
                         print(f"❌ Error cerrando por freno emergencia: {e}")
@@ -208,12 +211,14 @@ def tactica_salida_trailing_stop_wma(
                 if not simular:
                     exit_side = "SELL" if side == "long" else "BUY"
                     try:
-                        client.new_order(
+                        execute_close_market(
+                            client=client,
                             symbol=symbol,
                             side=exit_side,
-                            type="MARKET",
                             quantity=qty_close_str,
-                            reduceOnly=True,
+                            simular=simular,
+                            reduce_only=True,
+                            context="STOP_CLASICO",
                         )
                     except Exception as e:
                         print(f"❌ Error al enviar la orden de cierre en Futuros: {e}")

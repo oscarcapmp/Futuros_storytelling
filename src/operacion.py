@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import time
-import estado_operacion
 from config_wma_pack import wma_name_from_len
+from execution import execute_close_market, execute_entry_market
 from infra_futuros import (
     atr,
     floor_to_step,
     format_quantity,
-    get_futures_usdt_balance,
     get_hlc_futures,
     get_lot_size_filter_futures,
     get_min_notional_futures,
@@ -118,14 +117,18 @@ def cerrar_posicion_market(client, symbol: str, simular: bool):
         return
 
     try:
-        resp = client.new_order(symbol=symbol, side=side, type="MARKET", quantity=qty_str)
+        res = execute_close_market(
+            client=client,
+            symbol=symbol,
+            side=side,
+            quantity=qty_str,
+            simular=simular,
+            reduce_only=True,
+            context="CIERRE_MANUAL",
+        )
+        resp = res.get("resp", {}) or res
         print("✅ Orden de cierre enviada. Respuesta de Binance:")
         print(resp)
-        try:
-            balance_final = get_futures_usdt_balance(client)
-            estado_operacion.save_end(balance_final)
-        except Exception as e:
-            print(f"⚠️ No se pudo guardar cierre de operación: {e}")
     except Exception as e:
         print(f"❌ Error al cerrar la posición: {e}")
 
@@ -275,25 +278,20 @@ def comprar_long_por_cruce_wma(
         print("SIMULACIÓN: No se envía orden de apertura real.\n")
     else:
         try:
-            balance_inicial = get_futures_usdt_balance(client)
-            try:
-                estado_operacion.save_start(symbol, balance_inicial)
-            except Exception as e:
-                print(f"⚠️ No se pudo guardar inicio de operación: {e}")
-        except Exception as e:
-            print(f"⚠️ No se pudo leer balance inicial para guardar estado: {e}")
-
-        try:
             print("📥 ENVIANDO ORDEN MARKET BUY (LONG FUTUROS)...")
-            entry_order = client.new_order(
+            res = execute_entry_market(
                 symbol=symbol,
                 side="BUY",
-                type="MARKET",
-                quantity=qty_str
+                quantity=qty_str,
+                client=client,
+                simular=simular,
+                reduce_only=False,
+                context="ENTRY_WMA",
             )
             print("Orden de APERTURA LONG enviada. Respuesta de Binance:")
+            entry_order = res.get("resp", {})
             print(entry_order)
-            entry_order_id = entry_order.get("orderId")
+            entry_order_id = res.get("orderId") or (entry_order.get("orderId") if isinstance(entry_order, dict) else None)
 
             time.sleep(0.5)
             pos = get_current_position(client, symbol)
@@ -518,25 +516,20 @@ def comprar_short_por_cruce_wma(
         print("SIMULACIÓN: No se envía orden de apertura real.\n")
     else:
         try:
-            balance_inicial = get_futures_usdt_balance(client)
-            try:
-                estado_operacion.save_start(symbol, balance_inicial)
-            except Exception as e:
-                print(f"⚠️ No se pudo guardar inicio de operación: {e}")
-        except Exception as e:
-            print(f"⚠️ No se pudo leer balance inicial para guardar estado: {e}")
-
-        try:
             print("📥 ENVIANDO ORDEN MARKET SELL (SHORT FUTUROS)...")
-            entry_order = client.new_order(
+            res = execute_entry_market(
                 symbol=symbol,
                 side="SELL",
-                type="MARKET",
-                quantity=qty_str
+                quantity=qty_str,
+                client=client,
+                simular=simular,
+                reduce_only=False,
+                context="ENTRY_WMA",
             )
             print("Orden de APERTURA SHORT enviada. Respuesta de Binance:")
+            entry_order = res.get("resp", {})
             print(entry_order)
-            entry_order_id = entry_order.get("orderId")
+            entry_order_id = res.get("orderId") or (entry_order.get("orderId") if isinstance(entry_order, dict) else None)
 
             time.sleep(0.5)
             pos = get_current_position(client, symbol)
