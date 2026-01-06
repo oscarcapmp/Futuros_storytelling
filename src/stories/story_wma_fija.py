@@ -38,6 +38,19 @@ def _preparar_nueva_operacion(client, symbol: str, simular: bool):
         print("Opción de lado no válida, se usa LONG por defecto.")
 
     balance_usdt = get_futures_usdt_balance(client)
+    max_lev = get_max_leverage_symbol(client, symbol)
+    usar_max = leer_bool(
+        "¿Usar leverage máximo permitido por el símbolo? (s/n) [n]: ",
+        default=False,
+    )
+    lev_to_use = max_lev if usar_max else min(20, max_lev)
+    disponible_apalancado_teorico = balance_usdt * lev_to_use
+
+    print(f"Balance disponible: {balance_usdt:.2f} USDT")
+    print(f"Leverage máximo símbolo: {max_lev}")
+    print(f"Leverage que usará el bot: {lev_to_use}")
+    print(f"Disponible apalancado (teórico): {disponible_apalancado_teorico:.2f} USDT")
+
     default_poder = balance_usdt if balance_usdt > 0 else 50.0
     poder_usdt = leer_float(
         "Poder de trading (USDT) que deseas usar para esta entrada: ",
@@ -65,8 +78,6 @@ def _preparar_nueva_operacion(client, symbol: str, simular: bool):
         return None
 
     qty_str = format_quantity(qty_est)
-    max_lev = get_max_leverage_symbol(client, symbol)
-    lev_to_use = min(20, max_lev)
 
     entry_exec_price = price
     entry_margin_usdt = (qty_est * entry_exec_price) / lev_to_use if lev_to_use != 0 else qty_est * entry_exec_price
@@ -80,6 +91,7 @@ def _preparar_nueva_operacion(client, symbol: str, simular: bool):
         "entry_margin_usdt": entry_margin_usdt,
         "leverage": lev_to_use,
         "max_leverage": max_lev,
+        "usar_max": usar_max,
     }
 
 
@@ -160,6 +172,7 @@ def run_story_wma_fija(client):
     if opcion == "1":
         lev_to_use = nueva_operacion_plan["leverage"]
         if not simular:
+            print(f"Configurando leverage {lev_to_use}x para {symbol}...")
             try:
                 client.change_leverage(symbol=symbol, leverage=lev_to_use)
             except Exception as e:

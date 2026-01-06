@@ -3,6 +3,7 @@ from infra_futuros import get_hlc_futures, wma
 
 
 ENTRY_BREAKOUT_BUFFER_PCT = 0.17
+STATUS_EVERY_SECONDS = 10
 
 
 def tactica_entrada_cruce_wma(
@@ -22,7 +23,8 @@ def tactica_entrada_cruce_wma(
 
     last_closed_close = None
     pending_breakout = None
-    heartbeat_counter = 0
+    last_status_ts = 0
+    last_structure = None
 
     while True:
         try:
@@ -37,6 +39,7 @@ def tactica_entrada_cruce_wma(
             close_current = closes[-1]
             high_current = highs[-1]
             low_current = lows[-1]
+            wma_current = wma(closes, wma_entry_len)
 
             if last_closed_close is None:
                 last_closed_close = close_prev
@@ -45,26 +48,31 @@ def tactica_entrada_cruce_wma(
 
             # Evaluar breakout intravela y latcheado
             if pending_breakout:
-                wma_current = wma(closes, wma_entry_len)
                 current_state = "above" if close_current > wma_current else "below"
 
                 if current_state == pending_breakout["reset_state"]:
                     print("[ENTRADA-FUT] Breakout signal reset (structure invalidated). Looking for new entry.")
                     pending_breakout = None
-                    heartbeat_counter = 0
+                    last_structure = current_state
                 else:
                     trigger = pending_breakout["trigger"]
                     trigger_side = pending_breakout["side"]
                     breakout = high_current >= trigger if trigger_side == "long" else low_current <= trigger
                     if breakout:
                         print(f"\n✅ [FUTUROS] Entrada {trigger_side.upper()} ejecutada por ruptura a {trigger:.4f}.")
-                        heartbeat_counter = 0
                         return trigger
-                    heartbeat_counter += 1
-                    if heartbeat_counter % 4 == 0:
+                    now = time.time()
+                    if (
+                        current_state != last_structure
+                        or now - last_status_ts >= STATUS_EVERY_SECONDS
+                    ):
                         print(
-                            f"[ENTRADA-FUT] Waiting for breakout @ {trigger:.4f} | price_now={close_current:.4f}"
+                            "[ENTRADA-FUT] Status | "
+                            f"price={close_current:.4f} wma={wma_current:.4f} "
+                            f"structure={current_state} breakout=ON trigger={trigger:.4f}"
                         )
+                        last_status_ts = now
+                        last_structure = current_state
 
             if new_closed:
                 if pending_breakout is None:
@@ -93,13 +101,18 @@ def tactica_entrada_cruce_wma(
                             f"buffer: {buffer:.4f}"
                         )
                         print(f"[ENTRADA-FUT] Trigger calculado: {trigger:.4f}")
-                        print(f"[ENTRADA-FUT] Waiting for breakout @ {trigger:.4f}")
+                        print(
+                            "[ENTRADA-FUT] Breakout latched ON | "
+                            f"price={close_current:.4f} wma={wma_current:.4f} "
+                            f"structure={prev_state} trigger={trigger:.4f}"
+                        )
                         pending_breakout = {
                             "side": side,
                             "trigger": trigger,
                             "reset_state": prevprev_state,
                         }
-                        heartbeat_counter = 0
+                        last_status_ts = time.time()
+                        last_structure = prev_state
 
                     if side == "short" and prevprev_state == "above" and prev_state == "below":
                         print("\n✅ [FUTUROS] Señal de ENTRADA SHORT detectada (cruce bajista WMA de ENTRADA).")
@@ -113,15 +126,31 @@ def tactica_entrada_cruce_wma(
                             f"buffer: {buffer:.4f}"
                         )
                         print(f"[ENTRADA-FUT] Trigger calculado: {trigger:.4f}")
-                        print(f"[ENTRADA-FUT] Waiting for breakout @ {trigger:.4f}")
+                        print(
+                            "[ENTRADA-FUT] Breakout latched ON | "
+                            f"price={close_current:.4f} wma={wma_current:.4f} "
+                            f"structure={prev_state} trigger={trigger:.4f}"
+                        )
                         pending_breakout = {
                             "side": side,
                             "trigger": trigger,
                             "reset_state": prevprev_state,
                         }
-                        heartbeat_counter = 0
+                        last_status_ts = time.time()
+                        last_structure = prev_state
 
                 last_closed_close = close_prev
+            else:
+                now = time.time()
+                current_state = "above" if close_current > wma_current else "below"
+                if now - last_status_ts >= STATUS_EVERY_SECONDS:
+                    print(
+                        "[ENTRADA-FUT] Status | "
+                        f"price={close_current:.4f} wma={wma_current:.4f} "
+                        f"structure={current_state} breakout=OFF"
+                    )
+                    last_status_ts = now
+                    last_structure = current_state
 
             time.sleep(sleep_seconds)
 

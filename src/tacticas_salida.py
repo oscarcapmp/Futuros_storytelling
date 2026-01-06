@@ -13,6 +13,7 @@ from target import close_market_reduceonly_pct, should_trigger_touch_wma
 STOP_BREAKOUT_BUFFER_PCT = 0.17
 ATR_LEN_DEFAULT = 14
 ATR_MULT_DEFAULT = 1.5
+STOP_STATUS_EVERY_SECONDS = 10
 
 
 def tactica_salida_trailing_stop_wma(
@@ -57,6 +58,10 @@ def tactica_salida_trailing_stop_wma(
         freno_stop_level = freno_info.get("stop_level")
         freno_atr = freno_info.get("atr")
         freno_wma34 = freno_info.get("wma34")
+
+    last_stop_status_ts = 0
+    last_stop_structure = None
+    last_pending_active = False
 
     while True:
         try:
@@ -167,6 +172,7 @@ def tactica_salida_trailing_stop_wma(
             trailing_value_prev = wma(closes[:-1], trailing_len) if trailing_len else None
             trailing_value_prevprev = wma(closes[:-2], trailing_len) if trailing_len else None
 
+            prev_pending = stop_state.get("pending_breakout")
             stop_state, stop_decision = eval_stop_clasico_by_wma(
                 side=side,
                 close_current=close_current,
@@ -184,6 +190,7 @@ def tactica_salida_trailing_stop_wma(
                 state=stop_state,
                 buffer_ratio=STOP_BREAKOUT_BUFFER_PCT,
             )
+            current_pending = stop_state.get("pending_breakout")
 
             trailing_name_txt = trailing_name or "-"
             trailing_len_txt = trailing_len if trailing_len is not None else "-"
@@ -193,10 +200,58 @@ def tactica_salida_trailing_stop_wma(
             )
 
             if stop_decision.get("pending_trigger") is not None:
-                print(
-                    f"[STOP] Trigger preparado: {stop_decision.get('pending_trigger'):.4f} "
-                    f"(buffer={stop_decision.get('pending_buffer'):.4f})"
+                wma_txt = f"{trailing_value_current:.4f}" if trailing_value_current is not None else "N/D"
+                structure_state = (
+                    "above" if trailing_value_current is not None and price_for_stop > trailing_value_current else
+                    "below" if trailing_value_current is not None else "N/D"
                 )
+                print(
+                    "[STOP] Trigger preparado: "
+                    f"{stop_decision.get('pending_trigger'):.4f} (buffer={stop_decision.get('pending_buffer'):.4f}) | "
+                    f"price={price_for_stop:.4f} wma={wma_txt} "
+                    f"structure={structure_state} breakout=ON"
+                )
+                last_stop_status_ts = time.time()
+                last_stop_structure = structure_state
+                last_pending_active = True
+            elif prev_pending and not current_pending and stop_mode_norm == "breakout" and stop_decision.get("action") == "none":
+                print("[STOP] Breakout reset (structure invalidated).")
+                last_pending_active = False
+            elif current_pending and stop_mode_norm == "breakout":
+                wma_txt = f"{trailing_value_current:.4f}" if trailing_value_current is not None else "N/D"
+                structure_state = (
+                    "above" if trailing_value_current is not None and price_for_stop > trailing_value_current else
+                    "below" if trailing_value_current is not None else "N/D"
+                )
+                now = time.time()
+                if structure_state != last_stop_structure or now - last_stop_status_ts >= STOP_STATUS_EVERY_SECONDS:
+                    trigger_val = current_pending.get("trigger")
+                    buffer_val = current_pending.get("buffer")
+                    print(
+                        "[STOP] Status | "
+                        f"price={price_for_stop:.4f} wma={wma_txt} "
+                        f"structure={structure_state} breakout=ON trigger={trigger_val:.4f} buffer={buffer_val:.4f}"
+                    )
+                    last_stop_status_ts = now
+                    last_stop_structure = structure_state
+                    last_pending_active = True
+            elif stop_mode_norm == "breakout":
+                now = time.time()
+                wma_txt = f"{trailing_value_current:.4f}" if trailing_value_current is not None else "N/D"
+                structure_state = (
+                    "above" if trailing_value_current is not None and price_for_stop > trailing_value_current else
+                    "below" if trailing_value_current is not None else "N/D"
+                )
+                if (now - last_stop_status_ts >= STOP_STATUS_EVERY_SECONDS) or last_pending_active:
+                    wma_txt = f"{trailing_value_current:.4f}" if trailing_value_current is not None else "N/D"
+                    print(
+                        "[STOP] Status | "
+                        f"price={price_for_stop:.4f} wma={wma_txt} "
+                        f"structure={structure_state} breakout=OFF"
+                    )
+                    last_stop_status_ts = now
+                    last_stop_structure = structure_state
+                    last_pending_active = False
 
             if stop_decision.get("action") == "close_all":
                 exit_price = stop_decision.get("exit_price", price_for_stop)
