@@ -1,6 +1,14 @@
 import sys
 
 import estado_operacion
+from core.time_utils import to_bogota_iso
+
+
+def _safe_bogota(ts_val: str) -> str:
+    try:
+        return to_bogota_iso(ts_val)
+    except Exception:
+        return ts_val or ""
 
 
 def _error(msg: str) -> None:
@@ -26,11 +34,14 @@ def main() -> None:
     resultado = balance_final - balance_initial
     roi_pct = (resultado / balance_initial) * 100
 
+    ts_start = _safe_bogota(data.get("ts_start", ""))
+    ts_end = _safe_bogota(data.get("ts_end", ""))
+
     print("--------------------------------")
     print("REPORTE FINAL DE OPERACIÓN")
     print(f"Símbolo:        {data.get('symbol', '')}")
-    print(f"Inicio:         {data.get('ts_start', '')}")
-    print(f"Fin:            {data.get('ts_end', '')}")
+    print(f"Inicio:         {ts_start}")
+    print(f"Fin:            {ts_end}")
     print(f"Balance inicial: {balance_initial:,.2f} USDT")
     print(f"Balance final:   {balance_final:,.2f} USDT")
     print(f"Resultado:       {resultado:+,.2f} USDT")

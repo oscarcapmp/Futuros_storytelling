@@ -1,5 +1,6 @@
 from core.io_utils import leer_bool, leer_float, leer_int
 from core.posicion import leer_posicion_abierta
+from core.time_utils import now_bogota_iso
 from execution import execute_entry_market
 from infra_futuros import (
     floor_to_step,
@@ -24,32 +25,19 @@ INTRO_LINES = [
 
 def _imprimir_historia_inicial():
     print("\n=== Historia: WMA FIJA ===")
+    print(f"Hora Bogotá: {now_bogota_iso()}")
     for line in INTRO_LINES:
         print(line)
     print("")
 
 
-def _iniciar_nueva_operacion(client, symbol: str, simular: bool):
+def _preparar_nueva_operacion(client, symbol: str, simular: bool):
     side_input = input("Lado (long/short) [long]: ").strip().lower() or "long"
     side = side_input if side_input in ["long", "short"] else "long"
     if side_input not in ["long", "short"]:
         print("Opción de lado no válida, se usa LONG por defecto.")
 
     balance_usdt = get_futures_usdt_balance(client)
-    max_lev = get_max_leverage_symbol(client, symbol)
-    lev = leer_int(f"Apalancamiento a usar (max {max_lev}) [20]: ", default=20)
-    if lev <= 0:
-        lev = max_lev
-    if lev > max_lev:
-        print(f"Apalancamiento ajustado a máximo permitido: {max_lev}x")
-        lev = max_lev
-
-    if not simular:
-        try:
-            client.change_leverage(symbol=symbol, leverage=lev)
-        except Exception as e:
-            print(f"⚠️ No se pudo ajustar el leverage: {e}")
-
     default_poder = balance_usdt if balance_usdt > 0 else 50.0
     poder_usdt = leer_float(
         "Poder de trading (USDT) que deseas usar para esta entrada: ",
@@ -77,31 +65,22 @@ def _iniciar_nueva_operacion(client, symbol: str, simular: bool):
         return None
 
     qty_str = format_quantity(qty_est)
-    order_side = "BUY" if side == "long" else "SELL"
+    max_lev = get_max_leverage_symbol(client, symbol)
+    lev_to_use = min(20, max_lev)
 
-    print(f"Enviando entrada MARKET {order_side} {qty_str} en {symbol} (modo {'SIMULACION' if simular else 'REAL'})")
-    execute_entry_market(
-        client=client,
-        symbol=symbol,
-        side=order_side,
-        quantity=qty_str,
-        simular=simular,
-    )
+    entry_exec_price = price
+    entry_margin_usdt = (qty_est * entry_exec_price) / lev_to_use if lev_to_use != 0 else qty_est * entry_exec_price
 
-    pos_info = leer_posicion_abierta(client, symbol)
-    if not pos_info:
-        entry_exec_price = price
-        entry_margin_usdt = (qty_est * entry_exec_price) / lev if lev != 0 else qty_est * entry_exec_price
-        pos_info = {
-            "side": side,
-            "qty_est": qty_est,
-            "qty_str": qty_str,
-            "entry_exec_price": entry_exec_price,
-            "entry_margin_usdt": entry_margin_usdt,
-            "leverage": lev,
-        }
-
-    return pos_info
+    return {
+        "side": side,
+        "poder_usdt": poder_usdt,
+        "qty_est": qty_est,
+        "qty_str": qty_str,
+        "entry_exec_price": entry_exec_price,
+        "entry_margin_usdt": entry_margin_usdt,
+        "leverage": lev_to_use,
+        "max_leverage": max_lev,
+    }
 
 
 def run_story_wma_fija(client):
@@ -118,12 +97,15 @@ def run_story_wma_fija(client):
     opcion = input("Elige una opción (1/2): ").strip()
 
     pos_info = None
+    nueva_operacion_plan = None
+    max_lev_symbol = None
     if opcion == "1":
         print("\nCapítulo 2: Entrada")
-        pos_info = _iniciar_nueva_operacion(client, symbol, simular)
-        if not pos_info:
+        nueva_operacion_plan = _preparar_nueva_operacion(client, symbol, simular)
+        if not nueva_operacion_plan:
             print("No se pudo iniciar la operación. Historia detenida.")
             return
+        max_lev_symbol = nueva_operacion_plan["max_leverage"]
     elif opcion == "2":
         print("\nCapítulo 2: Entrada")
         pos_info = leer_posicion_abierta(client, symbol)
@@ -131,6 +113,7 @@ def run_story_wma_fija(client):
             print(f"No se encontró posición abierta en {symbol}. Historia detenida.")
             return
         side = pos_info.get("side")
+        max_lev_symbol = get_max_leverage_symbol(client, symbol)
         print(
             f"Usaremos la posición detectada: side={side}, qty={pos_info.get('qty_str')}, "
             f"entry={pos_info.get('entry_exec_price')}, lev={pos_info.get('leverage')}x"
@@ -139,7 +122,7 @@ def run_story_wma_fija(client):
         print("Opción no válida. Historia detenida.")
         return
 
-    side = pos_info.get("side")
+    side = (pos_info or nueva_operacion_plan).get("side")
     print("\nCapítulo 3: Stop por WMA")
     wma_stop_len = leer_int("Longitud de WMA de STOP (ej: 144) [144]: ", default=144)
     if wma_stop_len <= 0:
@@ -150,6 +133,61 @@ def run_story_wma_fija(client):
     print("2) Cruce inmediato (clásico)")
     stop_rule_opcion = input("Elige una opción (1/2): ").strip()
     stop_rule_mode = "cross" if stop_rule_opcion == "2" else "breakout"
+
+    print("\nRESUMEN DE LA HISTORIA")
+    print(f"- Símbolo: {symbol}")
+    print(f"- Modo: {'SIMULACION' if simular else 'REAL'}")
+    print(f"- Intervalo: {interval} | Sleep: {sleep_seconds}s")
+    if opcion == "1":
+        print("- Tipo: nueva operación")
+        print(f"- Lado: {nueva_operacion_plan['side']} | Poder USDT: {nueva_operacion_plan['poder_usdt']}")
+        print(
+            f"- Leverage máximo del símbolo: {max_lev_symbol} | Leverage que usará el bot: {nueva_operacion_plan['leverage']}"
+        )
+    else:
+        print("- Tipo: posición abierta")
+        print(
+            f"- Leverage posición: {pos_info.get('leverage')} | Leverage máximo del símbolo: {max_lev_symbol}"
+        )
+    print(f"- WMA stop: {wma_stop_len}")
+    print(f"- Modo stop: {'cruce' if stop_rule_mode == 'cross' else 'breakout'}")
+
+    go = input("¿GO? (s/n) [s]: ").strip().lower() or "s"
+    if go not in ["s", "si", "sí", "y", "yes"]:
+        print("Cancelado")
+        return
+
+    if opcion == "1":
+        lev_to_use = nueva_operacion_plan["leverage"]
+        if not simular:
+            try:
+                client.change_leverage(symbol=symbol, leverage=lev_to_use)
+            except Exception as e:
+                print(f"⚠️ No se pudo ajustar el leverage: {e}")
+
+        order_side = "BUY" if nueva_operacion_plan["side"] == "long" else "SELL"
+        print(
+            f"Enviando entrada MARKET {order_side} {nueva_operacion_plan['qty_str']} en {symbol} "
+            f"(modo {'SIMULACION' if simular else 'REAL'})"
+        )
+        execute_entry_market(
+            client=client,
+            symbol=symbol,
+            side=order_side,
+            quantity=nueva_operacion_plan["qty_str"],
+            simular=simular,
+        )
+
+        pos_info = leer_posicion_abierta(client, symbol)
+        if not pos_info:
+            pos_info = {
+                "side": nueva_operacion_plan["side"],
+                "qty_est": nueva_operacion_plan["qty_est"],
+                "qty_str": nueva_operacion_plan["qty_str"],
+                "entry_exec_price": nueva_operacion_plan["entry_exec_price"],
+                "entry_margin_usdt": nueva_operacion_plan["entry_margin_usdt"],
+                "leverage": lev_to_use,
+            }
 
     base_asset = symbol.replace("USDT", "")
 
