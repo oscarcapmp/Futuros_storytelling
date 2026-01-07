@@ -1,4 +1,5 @@
 from infra_futuros import get_futures_client
+from stories import story_trading_manual
 from stories.story_wma_fija import run_story_wma_fija
 
 
@@ -9,15 +10,18 @@ def main():
     while True:
         print("\nMenú:")
         print("1) Historia WMA fija")
-        print("2) (placeholder) otras historias")
-        print("3) Salir")
-        opcion = input("Elige una opción (1/2/3): ").strip()
+        print("2) Trading Manual")
+        print("3) (placeholder) otras historias")
+        print("4) Salir")
+        opcion = input("Elige una opción (1/2/3/4): ").strip()
 
         if opcion == "1":
             run_story_wma_fija(client)
         elif opcion == "2":
-            print("Placeholder: más historias próximamente.")
+            story_trading_manual.main()
         elif opcion == "3":
+            print("Placeholder: más historias próximamente.")
+        elif opcion == "4":
             print("Saliendo del orquestador.")
             break
         else:
