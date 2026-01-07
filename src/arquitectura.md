@@ -47,3 +47,85 @@ bot_futuros_main.py → menú por modo operativo (nueva operación / posición a
 
 ## Decisiones descartadas
 - Stop nativo en Binance (Algo Orders): revertido por complejidad y cambios de API; se mantiene STOP MARKET ejecutado por el bot para mayor simplicidad operativa.
+
+## Arquitectura Storytelling (LEGO)
+
+El sistema está organizado bajo el siguiente principio fundamental:
+
+> Cada historia es un programa independiente (main).
+
+Esto implica que:
+
+- Cada archivo en `src/stories/story_*.py` representa una historia completa:
+  - Tiene su propio flujo de ejecución
+  - Sus propias preguntas y decisiones
+  - Su propia lógica de entrada y salida
+- Las historias NO se llaman entre sí.
+- Las historias NO comparten estado.
+- El único punto de unión entre historias es el orquestador.
+
+### Componentes principales
+
+- `src/main.py`  
+  Punto de entrada del sistema.
+
+- `src/app/orquestador.py`  
+  Muestra un menú y ejecuta UNA única historia seleccionada.
+
+- `src/stories/`  
+  Contiene historias independientes (mains), por ejemplo:
+  - `story_wma_fija.py`
+  - `story_trailing_dinamico.py`
+  - `story_quantfury.py`
+
+- `src/core/`  
+  Helpers reutilizables compartidos entre historias:
+  - Entrada/salida (IO)
+  - Manejo de tiempo y zonas horarias
+  - Lectura de posición y utilidades comunes
+
+- `src/indicators/`  
+  Cálculo puro de indicadores técnicos (WMA, ATR, etc.).
+  Esta carpeta:
+  - NO contiene lógica de decisión
+  - NO ejecuta órdenes
+  - NO contiene storytelling
+
+- `src/execution/`  
+  Capa de ejecución de órdenes.
+  Contiene funciones responsables de:
+  - Envío de órdenes MARKET / LIMIT
+  - Cierre de posiciones
+  - Diferenciar ejecución REAL vs SIMULADA
+  - Guardar estado de la operación (inicio / fin)
+
+  Esta carpeta:
+  - NO contiene lógica de trading
+  - NO contiene storytelling
+  - Es invocada únicamente por las historias
+
+### Flujo lógico del sistema
+
+El flujo correcto del sistema es vertical y desacoplado:
+
+story (decide y narra)
+   ↓
+tacticas_* / indicators (evalúan condiciones)
+   ↓
+execution (ejecuta órdenes)
+   ↓
+broker / exchange
+
+Ninguna capa inferior conoce a una capa superior.
+
+### Módulos LEGO existentes (NO refactorizar)
+
+Estos módulos proveen funcionalidades reutilizables y NO deben ser modificados
+salvo indicación explícita:
+
+- `tacticas_entrada.py`
+- `tacticas_salida.py`
+- `operacion.py`
+- `infra_futuros.py`
+- `execution/*`
+- `indicators/*`

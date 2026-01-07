@@ -20,6 +20,11 @@ python bot_futuros_main.py
 ```
 Requiere Python 3.10+, `binance-futures-connector` instalado y variables `BINANCE_API_KEY`, `BINANCE_API_SECRET` exportadas. Primer menú: nueva operación, gestionar posición abierta o gestión manual (ver/cerrar).
 
+### Ejecución por historias
+
+El sistema se ejecuta mediante un orquestador que permite seleccionar una historia de trading.
+Cada historia es un flujo independiente (main) y se ejecuta de forma aislada.
+
 ## Cómo navegar el código (orden sugerido)
 1) `bot_futuros_main.py` — menú y configuración de modos.
 2) `operacion.py` — estrategias long/short, sizing y arranque de trailing.
