@@ -68,13 +68,22 @@ def create_target_limit_order(client, symbol: str, side: str, quantity: str, pri
 def get_open_orders(client, symbol: str) -> List[Dict[str, Any]]:
     """Obtiene órdenes abiertas para el símbolo."""
     try:
-        return client.get_open_orders(symbol=symbol)
-    except AttributeError:
-        # Versiones antiguas usan open_orders
-        try:
-            return client.open_orders(symbol=symbol)
-        except Exception as e:
-            raise RuntimeError(f"Error obteniendo órdenes abiertas: {e}") from e
+        return client.open_orders(symbol=symbol)
+    except Exception as e:
+        msg = str(e)
+        if "orderId is mandatory" in msg:
+            pass
+        elif isinstance(e, AttributeError):
+            pass
+        else:
+            try:
+                return client.get_orders(symbol=symbol)
+            except Exception:
+                raise RuntimeError(f"Error obteniendo órdenes abiertas: {e}") from e
+
+    try:
+        orders = client.get_orders(symbol=symbol)
+        return [o for o in orders if (o.get("status") == "NEW")]
     except Exception as e:
         raise RuntimeError(f"Error obteniendo órdenes abiertas: {e}") from e
 
