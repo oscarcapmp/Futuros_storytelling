@@ -18,7 +18,6 @@ from execution_manual.binance_futures_limit import (
     get_open_orders,
     get_position_info,
     get_price,
-    cancel_order,
 )
 
 
@@ -266,33 +265,6 @@ def main(client=None):
             f"[MANUAL][DEBUG] current_price={current_price} | "
             f"user_entry_price={entry_price} | side={entry_side_preview} | qty={quantity_str}"
         )
-        if not simular:
-            try:
-                existing_orders = get_open_orders(client, symbol)
-            except Exception as e:
-                print(f"⚠️ No se pudieron listar órdenes abiertas pre-flight: {e}")
-                existing_orders = []
-            if existing_orders:
-                print("⚠️ Hay órdenes abiertas previas en", symbol)
-                for o in existing_orders:
-                    print(
-                        f" - orderId={o.get('orderId')} type={o.get('type')} side={o.get('side')} "
-                        f"price={o.get('price')} origQty={o.get('origQty')} status={o.get('status')}"
-                    )
-                resp_cancel = _leer_str(
-                    f"⚠️ Hay órdenes abiertas previas en {symbol}. ¿Cancelar todas antes de continuar? (s/n): ",
-                    "n",
-                ).lower()
-                if resp_cancel in YES_VALUES:
-                    for o in existing_orders:
-                        try:
-                            cancel_order(client, symbol, o.get("orderId"))
-                            print(f"   · Orden {o.get('orderId')} cancelada.")
-                        except Exception as e:
-                            print(f"   · No se pudo cancelar {o.get('orderId')}: {e}")
-                else:
-                    print("Aborto: no se operará con órdenes previas abiertas.")
-                    return
         go = _leer_str("¿GO? (s/n) [n]: ", "n").lower()
         if go not in YES_VALUES:
             print("Historia cancelada antes de enviar órdenes.")
@@ -331,114 +303,76 @@ def main(client=None):
             f"{pos.get('positionAmt')} entryPrice={pos.get('entryPrice')}"
         )
 
-        stop_order_id = None
+        print("Creando orden STOP (STOP_MARKET) reduce-only...")
+        stop_resp = create_stop_order(
+            client, symbol=symbol, side=close_side, quantity=quantity_str, stop_price=str(stop_price), reduce_only=True
+        )
+        context["last_response"] = stop_resp
+        stop_order_id = stop_resp.get("orderId")
+        print(f"Stop enviado. {_formatear_orden(stop_resp)}")
+
+        target_resp = None
         target_order_id = None
+        if target_price is not None:
+            print("Creando orden LIMIT de target reduce-only...")
+            target_resp = create_target_limit_order(
+                client,
+                symbol=symbol,
+                side=close_side,
+                quantity=quantity_str,
+                price=str(target_price),
+                reduce_only=True,
+            )
+            context["last_response"] = target_resp
+            target_order_id = target_resp.get("orderId")
+            print(f"Target enviado. {_formatear_orden(target_resp)}")
+
+        _imprimir_capitulo("Capítulo 6 — LOOP DE MONITOREO")
+        tick = 0
+        had_position = False
+        last_upnl = 0.0
         try:
-            time.sleep(2)
-            pos_after = get_position_info(client, symbol)
-            orders_after = get_open_orders(client, symbol)
-            entry_exec_qty = float(entry_resp.get("executedQty", "0") or 0)
-            entry_status = entry_resp.get("status")
-            pos_amt_after = float(pos_after.get("positionAmt", "0") or 0)
-            pos_entry_after = pos_after.get("entryPrice")
-            entry_in_open = any(o.get("orderId") == entry_order_id for o in orders_after)
-            print(
-                f"[MANUAL][DEBUG] post-entry positionAmt={pos_amt_after} entryPrice={pos_entry_after} "
-                f"entry_order_open={entry_in_open} entry_status_resp={entry_status} executedQty_resp={entry_exec_qty}"
-            )
-            print(
-                "[MANUAL][DEBUG] open_orders_after="
-                f"{[{'orderId': o.get('orderId'), 'status': o.get('status'), 'price': o.get('price'), 'origQty': o.get('origQty'), 'executedQty': o.get('executedQty')} for o in orders_after]}"
-            )
+            while True:
+                tick += 1
+                price_now = get_price(client, symbol)
+                open_orders = get_open_orders(client, symbol)
+                pos_info = get_position_info(client, symbol)
 
-            if abs(pos_amt_after) > 0 and entry_exec_qty == 0 and entry_in_open:
+                amt = float(pos_info.get("positionAmt", "0") or 0)
+                entry_avg = float(pos_info.get("entryPrice", "0") or 0)
+                upnl = float(pos_info.get("unRealizedProfit", "0") or 0)
+                has_position = abs(amt) > 0
+                if has_position:
+                    had_position = True
+                    last_upnl = upnl
+
                 print(
-                    "⚠️ Posición abierta detectada pero la orden de entrada reporta NEW/0. "
-                    "Esto sugiere que otra orden se ejecutó. ABORTANDO para evitar riesgo."
+                    f"[{tick}] Precio actual: {price_now:.4f} | "
+                    f"Ordenes abiertas: {len(open_orders)} | "
+                    f"Posición: {amt} @ {entry_avg} | uPnL: {upnl}"
                 )
-                try:
-                    cancel_order(client, symbol, entry_order_id)
-                    print(f"Orden de entrada {entry_order_id} cancelada por inconsistencia.")
-                except Exception as e:
-                    print(f"No se pudo cancelar la orden de entrada {entry_order_id}: {e}")
-                return
+                if open_orders:
+                    for o in open_orders:
+                        print(f"   · {_formatear_orden(o)}")
+                else:
+                    print("   · No hay órdenes abiertas.")
 
-            print("Creando orden STOP (STOP_MARKET) reduce-only...")
-            stop_resp = create_stop_order(
-                client, symbol=symbol, side=close_side, quantity=quantity_str, stop_price=str(stop_price), reduce_only=True
-            )
-            context["last_response"] = stop_resp
-            stop_order_id = stop_resp.get("orderId")
-            print(f"Stop enviado. {_formatear_orden(stop_resp)}")
+                if had_position and not has_position:
+                    print("Posición cerrada detectada (stop/target o cierre manual).")
+                    print(f"uPnL final aproximado (última lectura): {last_upnl}")
+                    break
 
-            target_resp = None
-            if target_price is not None:
-                print("Creando orden LIMIT de target reduce-only...")
-                target_resp = create_target_limit_order(
-                    client,
-                    symbol=symbol,
-                    side=close_side,
-                    quantity=quantity_str,
-                    price=str(target_price),
-                    reduce_only=True,
-                )
-                context["last_response"] = target_resp
-                target_order_id = target_resp.get("orderId")
-                print(f"Target enviado. {_formatear_orden(target_resp)}")
+                time.sleep(sleep_seconds)
+        except KeyboardInterrupt:
+            print("\nInterrupción del usuario. Órdenes quedan sin forzar cancelaciones.")
+            print(f"Orden entrada id={entry_order_id} | stop id={stop_order_id} | target id={target_order_id}")
 
-            _imprimir_capitulo("Capítulo 6 — LOOP DE MONITOREO")
-            tick = 0
-            had_position = False
-            last_upnl = 0.0
-            try:
-                while True:
-                    tick += 1
-                    price_now = get_price(client, symbol)
-                    open_orders = get_open_orders(client, symbol)
-                    pos_info = get_position_info(client, symbol)
-
-                    amt = float(pos_info.get("positionAmt", "0") or 0)
-                    entry_avg = float(pos_info.get("entryPrice", "0") or 0)
-                    upnl = float(pos_info.get("unRealizedProfit", "0") or 0)
-                    has_position = abs(amt) > 0
-                    if has_position:
-                        had_position = True
-                        last_upnl = upnl
-
-                    print(
-                        f"[{tick}] Precio actual: {price_now:.4f} | "
-                        f"Ordenes abiertas: {len(open_orders)} | "
-                        f"Posición: {amt} @ {entry_avg} | uPnL: {upnl}"
-                    )
-                    if open_orders:
-                        for o in open_orders:
-                            print(f"   · {_formatear_orden(o)}")
-                    else:
-                        print("   · No hay órdenes abiertas.")
-
-                    if had_position and not has_position:
-                        print("Posición cerrada detectada (stop/target o cierre manual).")
-                        print(f"uPnL final aproximado (última lectura): {last_upnl}")
-                        break
-
-                    time.sleep(sleep_seconds)
-            except KeyboardInterrupt:
-                print("\nInterrupción del usuario. Órdenes quedan sin forzar cancelaciones.")
-                print(f"Orden entrada id={entry_order_id} | stop id={stop_order_id} | target id={target_order_id}")
-
-            _imprimir_capitulo("Capítulo 7 — CIERRE + REPORTE")
-            print("Cerramos la escena con el resultado observado.")
-            if had_position:
-                print(f"Resultado final estimado: uPnL {last_upnl}")
-            else:
-                print("No se detectó posición abierta durante el seguimiento.")
-        except Exception as e:
-            try:
-                cancel_order(client, symbol, entry_order_id)
-                print(f"⚠️ Rollback: orden de entrada {entry_order_id} cancelada por error.")
-            except Exception as cancel_err:
-                print(f"⚠️ No se pudo cancelar la orden de entrada {entry_order_id} tras el error: {cancel_err}")
-            raise e
+        _imprimir_capitulo("Capítulo 7 — CIERRE + REPORTE")
+        print("Cerramos la escena con el resultado observado.")
+        if had_position:
+            print(f"Resultado final estimado: uPnL {last_upnl}")
+        else:
+            print("No se detectó posición abierta durante el seguimiento.")
 
     except KeyboardInterrupt:
         print("\nHistoria interrumpida manualmente.")
