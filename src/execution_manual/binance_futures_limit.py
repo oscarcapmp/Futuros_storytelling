@@ -3,23 +3,16 @@ from typing import Any, Dict, List
 
 def create_entry_limit_order(client, symbol: str, side: str, quantity: str, price: str, reduce_only: bool = False) -> Dict[str, Any]:
     """Crea una orden LIMIT de entrada."""
-    params = {
-        "symbol": symbol,
-        "side": side,
-        "type": "LIMIT",
-        "quantity": quantity,
-        "price": price,
-        "timeInForce": "GTC",
-        "reduceOnly": reduce_only,
-    }
-    print(f"[MANUAL][DEBUG] Sending ENTRY params: {params}")
     try:
-        resp = client.new_order(**params)
-        print(
-            f"[MANUAL][DEBUG] ENTRY resp type={resp.get('type')} status={resp.get('status')} "
-            f"price={resp.get('price')} executedQty={resp.get('executedQty')}"
+        return client.new_order(
+            symbol=symbol,
+            side=side,
+            type="LIMIT",
+            quantity=quantity,
+            price=price,
+            timeInForce="GTC",
+            reduceOnly=reduce_only,
         )
-        return resp
     except Exception as e:
         raise RuntimeError(f"Error creando orden LIMIT de entrada: {e}") from e
 

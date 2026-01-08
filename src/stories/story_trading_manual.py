@@ -260,11 +260,6 @@ def main(client=None):
         }
 
         _imprimir_resumen_plan(resumen, warnings)
-        entry_side_preview = "BUY" if side == "LONG" else "SELL"
-        print(
-            f"[MANUAL][DEBUG] current_price={current_price} | "
-            f"user_entry_price={entry_price} | side={entry_side_preview} | qty={quantity_str}"
-        )
         go = _leer_str("¿GO? (s/n) [n]: ", "n").lower()
         if go not in YES_VALUES:
             print("Historia cancelada antes de enviar órdenes.")
@@ -292,16 +287,6 @@ def main(client=None):
         context["last_response"] = entry_resp
         entry_order_id = entry_resp.get("orderId")
         print(f"Entrada enviada. {_formatear_orden(entry_resp)}")
-        orders = get_open_orders(client, symbol)
-        print(
-            "[MANUAL][DEBUG] open_orders_count="
-            f"{len(orders)} details={[{'orderId': o.get('orderId'), 'type': o.get('type'), 'status': o.get('status'), 'price': o.get('price'), 'origQty': o.get('origQty'), 'executedQty': o.get('executedQty')} for o in orders]}"
-        )
-        pos = get_position_info(client, symbol)
-        print(
-            "[MANUAL][DEBUG] positionAmt="
-            f"{pos.get('positionAmt')} entryPrice={pos.get('entryPrice')}"
-        )
 
         print("Creando orden STOP (STOP_MARKET) reduce-only...")
         stop_resp = create_stop_order(
