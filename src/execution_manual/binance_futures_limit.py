@@ -19,17 +19,27 @@ def create_entry_limit_order(client, symbol: str, side: str, quantity: str, pric
 
 def create_stop_order(client, symbol: str, side: str, quantity: str, stop_price: str, reduce_only: bool = True) -> Dict[str, Any]:
     """Crea una orden STOP (preferimos STOP_MARKET) para cerrar posición."""
+    if quantity is None or float(quantity) <= 0:
+        raise ValueError("quantity inválida para orden STOP")
+    if stop_price is None or float(stop_price) <= 0:
+        raise ValueError("stop_price inválido para orden STOP")
+
+    qty_str = str(quantity)
+    stop_str = str(stop_price)
+    params = {
+        "symbol": symbol,
+        "side": side,
+        "type": "STOP_MARKET",
+        "stopPrice": stop_str,
+        "quantity": qty_str,
+        "reduceOnly": reduce_only,
+        "workingType": "MARK_PRICE",
+    }
     try:
-        return client.new_order(
-            symbol=symbol,
-            side=side,
-            type="STOP_MARKET",
-            stopPrice=stop_price,
-            reduceOnly=reduce_only,
-            workingType="MARK_PRICE",
-        )
+        return client.new_order(**params)
     except Exception as e:
-        raise RuntimeError(f"Error creando orden STOP: {e}") from e
+        params_sanitized = {k: v for k, v in params.items() if k not in ["api_key", "api_secret"]}
+        raise RuntimeError(f"Error creando orden STOP: {e}. Params={params_sanitized}") from e
 
 
 def create_target_limit_order(client, symbol: str, side: str, quantity: str, price: str, reduce_only: bool = True) -> Dict[str, Any]:
