@@ -15,6 +15,7 @@ from infra_futuros import (
     wma,
 )
 from tacticas_salida import tactica_salida_trailing_stop_wma
+import reporte_final_operacion
 
 
 INTRO_LINES = [
@@ -373,7 +374,13 @@ def run_story_trading_cola(client):
         simular=simular,
     )
 
-    print("\nHistoria COLA completada.")
+    print("\nCapítulo Final: Resultado de la Operación")
+    try:
+        reporte_final_operacion.main()
+    except Exception as e:
+        print(f"⚠️ No se pudo generar el reporte final: {e}")
+
+    print("Historia COLA completada.")
 
 
 def main():
