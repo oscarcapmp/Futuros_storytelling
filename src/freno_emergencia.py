@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from infra_futuros import atr, get_hlc_futures, wma
+from config.Afinamiento import ATR_MULT_DEFAULT
 
 
 def compute_freno_emergencia_stop_level(
@@ -9,7 +10,7 @@ def compute_freno_emergencia_stop_level(
     interval: str,
     side: str,
     atr_len: int = 14,
-    atr_mult: float = 1.5,
+    atr_mult: float = ATR_MULT_DEFAULT,
 ) -> dict:
     """
     Calcula una sola vez el nivel del freno de emergencia basado en ATR + WMA34.

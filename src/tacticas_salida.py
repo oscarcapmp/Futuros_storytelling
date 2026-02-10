@@ -8,11 +8,15 @@ from Trailing_dinamico import get_trailing_reference
 from stop_clasico import init_stop_state, eval_stop_clasico_by_wma
 from freno_emergencia import compute_freno_emergencia_stop_level
 from target import close_market_reduceonly_pct, should_trigger_touch_wma
+from config.Afinamiento import (
+    ATR_MULT_DEFAULT,
+    ATR_MULT_EMERGENCY,
+    ATR_MULT_TRAILING,
+)
 
 
 STOP_BREAKOUT_BUFFER_PCT = 0.17
 ATR_LEN_DEFAULT = 14
-ATR_MULT_DEFAULT = 1.5
 STOP_STATUS_EVERY_SECONDS = 10
 
 

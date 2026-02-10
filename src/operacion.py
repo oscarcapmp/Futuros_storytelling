@@ -16,6 +16,7 @@ from infra_futuros import (
 from tacticas_entrada import tactica_entrada_cruce_wma
 from tacticas_salida import tactica_salida_trailing_stop_wma
 from tacticas_storytelling import storytelling_traguito_pa_las_almas, target_touch_wma_ctx
+from config.Afinamiento import ATR_MULT_DEFAULT
 
 
 def _calc_atr_stop_info(client, symbol: str, interval: str, entry_price: float, side: str, atr_len: int, atr_mult: float):
@@ -148,7 +149,7 @@ def comprar_long_por_cruce_wma(
     balance_usdt: float,
     trading_power: float,
     max_lev: int,
-    atr_mult: float = 1.5,
+    atr_mult: float = ATR_MULT_DEFAULT,
     emergency_brake_enabled: bool = True,
     target_mode: str | None = None,
     target_pct: float | None = None,
@@ -386,7 +387,7 @@ def comprar_short_por_cruce_wma(
     balance_usdt: float,
     trading_power: float,
     max_lev: int,
-    atr_mult: float = 1.5,
+    atr_mult: float = ATR_MULT_DEFAULT,
     emergency_brake_enabled: bool = True,
     target_mode: str | None = None,
     target_pct: float | None = None,
