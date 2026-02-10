@@ -42,8 +42,6 @@ def _preparar_plan_operacion(client, symbol: str, side: str):
     disponible_apalancado = balance_usdt * lev_to_use
 
     print(f"Balance disponible: {balance_usdt:.2f} USDT")
-    print(f"Leverage máximo símbolo: {max_lev}")
-    print(f"Leverage que usará el bot: {lev_to_use}")
     print(f"Disponible apalancado (teórico): {disponible_apalancado:.2f} USDT")
 
     default_poder = balance_usdt if balance_usdt > 0 else 50.0
@@ -268,18 +266,13 @@ def run_story_trading_cola(client):
         print("No se pudo preparar la operación. Historia detenida.")
         return
 
-    # CAP 2: Definir ENTRADA
+    # CAP 2: Definir ENTRADA (solo COLA)
     print("\nCapítulo 2: Definir ENTRADA")
-    print("Modo de entrada:")
-    print("A) MARKET inmediata")
-    print("B) COLA con WMA_COLA")
-    entrada_sel = input("Elige modo (A/B) [A]: ").strip().lower() or "a"
-    entrada_mode = "cola" if entrada_sel == "b" else "market"
-    wma_cola_len = None
-    if entrada_mode == "cola":
-        wma_cola_len = leer_int("Longitud de WMA_COLA (ej: 144) [144]: ", default=144)
-        if wma_cola_len <= 0:
-            wma_cola_len = 144
+    print("Entrada: COLA (WMA_COLA)")
+    entrada_mode = "cola"
+    wma_cola_len = leer_int("Longitud de WMA_COLA (ej: 89) [89]: ", default=89)
+    if wma_cola_len <= 0:
+        wma_cola_len = 89
 
     # CAP 3: Definir SALIDA
     print("\nCapítulo 3: Definir SALIDA / Gestión")
